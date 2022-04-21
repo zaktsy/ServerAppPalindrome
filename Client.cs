@@ -2,7 +2,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
+using System.Runtime.Serialization.Json;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace ServerApp
@@ -15,45 +17,38 @@ namespace ServerApp
             client = tcpClient;
         }
 
-        //в палиндромах сравнивается строка посимвольно, соотвественно строчные и заглавные буквы - разные символы
-        private static bool IsPalindrom(string str)
-        {
-            for (int i = 0; i < str.Length; i++)
-                if (str[i] != str[str.Length - i - 1]) return false;
-            return true;
-        }
-
         //метод получения и обработки запроса
-        public void Process()
+        public async Task Process()
         {
-            NetworkStream stream = null;
             try
             {
-                stream = client.GetStream();
-                byte[] data = new byte[1024]; 
-                while (true)
+                string message = String.Empty;
+                using (var stream = client.GetStream())
                 {
-                    StringBuilder builder = new StringBuilder();
-                    int bytes = 0;
-                    do
-                    {
-                        bytes = stream.Read(data, 0, data.Length);
-                        builder.Append(Encoding.Unicode.GetString(data, 0, bytes));
-                    }
-                    while (stream.DataAvailable);
+                    byte[] data = new byte[1024];
+                    await stream.ReadAsync(data, 0, data.Length);
+                    string resp = Encoding.Unicode.GetString(data);
+                    resp = resp.Replace("\0", "");
+                    PalindromeСandidate pal = JsonSerializer.Deserialize<PalindromeСandidate>(resp);
 
-                    string message = builder.ToString();
+
+                    Console.WriteLine("Получено: " + pal.Text);
 
                     //имитация длительного процесса выполнения
                     Thread.Sleep(5000);
                     
-                    Console.WriteLine(message);
+                    Console.WriteLine("Закончена обработка: " + pal.Text);
 
-                    //отправка результата
-                    message = IsPalindrom(message)? "1": "0";
-                    data = Encoding.Unicode.GetBytes(message);
-                    stream.Write(data, 0, data.Length);
+
+                    if (client.Connected)
+                    {
+                        Status status = PalindromeChecker.CheckPalindrome(pal.Text) ? Status.Yes : Status.No;
+                        pal.Status = status.ToString();
+                        ResponseSender responseSender = new ResponseSender();
+                        responseSender.SendResponse(pal, stream);
+                    } 
                 }
+
             }
             catch (Exception ex)
             {
@@ -61,11 +56,11 @@ namespace ServerApp
             }
             finally
             {
-                if (stream != null)
-                    stream.Close();
                 if (client != null)
+                {
                     client.Close();
-                
+                    client.Dispose();
+                }
             }
         }
     }
